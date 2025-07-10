@@ -33,13 +33,13 @@ class BlobDetectionNode(Node):
         # Setup SimpleBlobDetector parameters
         params = cv2.SimpleBlobDetector_Params()
         params.filterByArea = True
-        params.minArea = 500  # Minimum blob area (adjust for box size)
-        params.maxArea = 10000  # Maximum blob area
-        params.filterByCircularity = False  # Allow non-circular shapes for boxes
+        params.minArea = 200  # Adjusted for smaller boxes
+        params.maxArea = 20000  # Adjusted for larger boxes
+        params.filterByCircularity = False
         params.filterByConvexity = True
-        params.minConvexity = 0.8  # Ensure box-like shapes
+        params.minConvexity = 0.7  # Slightly relaxed for box shapes
         params.filterByInertia = True
-        params.minInertiaRatio = 0.5  # Allow rectangular shapes
+        params.minInertiaRatio = 0.3  # Allow rectangular shapes
         self.detector = cv2.SimpleBlobDetector_create(params)
 
         self.get_logger().info("Blob Detection Node initialized")
@@ -50,6 +50,7 @@ class BlobDetectionNode(Node):
 
         # Convert to grayscale for blob detection
         gray_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2GRAY)
+        gray_image = cv2.equalizeHist(gray_image)  # Enhance contrast
 
         # Apply blob detection
         keypoints = self.detector.detect(gray_image)
@@ -64,7 +65,7 @@ class BlobDetectionNode(Node):
             size = kp.size  # Diameter of the blob
             w = h = size  # Approximate square bounding box
 
-            # Filter for box-shaped blobs (aspect ratio heuristic)
+            # Filter for box-shaped blobs
             if self.is_box_shaped(w, h):
                 detection = Detection2D()
                 bbox = BoundingBox2D()
@@ -77,8 +78,8 @@ class BlobDetectionNode(Node):
 
                 # Object hypothesis
                 hypothesis = ObjectHypothesisWithPose()
-                hypothesis.id = "box"
-                hypothesis.score = 1.0  # Blob detector doesn't provide confidence
+                hypothesis.hypothesis.class_id = "box"  # Use class_id instead of id
+                hypothesis.hypothesis.score = 1.0  # Blob detector doesn't provide confidence
                 hypothesis.pose.pose.position.x = float(x)
                 hypothesis.pose.pose.position.y = float(y)
 
@@ -91,13 +92,7 @@ class BlobDetectionNode(Node):
                 y_min = int(y - h / 2)
                 x_max = int(x + w / 2)
                 y_max = int(y + h / 2)
-                cv2.rectangle(
-                    cv_image,
-                    (x_min, y_min),
-                    (x_max, y_max),
-                    (0, 255, 0),
-                    2
-                )
+                cv2.rectangle(cv_image, (x_min, y_min), (x_max, y_max), (0, 255, 0), 2)
                 cv2.putText(
                     cv_image,
                     "Box",
@@ -111,12 +106,12 @@ class BlobDetectionNode(Node):
         # Publish detections
         self.detection_pub.publish(detection_array)
 
-        # Display image (comment out if headless)
+        # Display image
         cv2.imshow("Blob Detections", cv_image)
         cv2.waitKey(1)
 
     def is_box_shaped(self, w, h):
-        # Heuristic for box-shaped blobs (near-square shapes)
+        # Heuristic for box-shaped blobs
         aspect_ratio = w / h if h > 0 else 1.0
         return 0.5 < aspect_ratio < 2.0
 
