@@ -1,5 +1,6 @@
 #Install dependencies
 ```
+sudo apt update
 sudo apt install ros-jazzy-rqt-image-view
 sudo apt install ros-jazzy-depthai-ros 
 sudo apt install ros-jazzy-cv-bridge ros-jazzy-image-transport python3-opencv
