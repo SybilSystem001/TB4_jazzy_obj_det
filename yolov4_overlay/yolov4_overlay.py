@@ -3,132 +3,104 @@
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Image
-from vision_msgs.msg import Detection2DArray, Detection2D, BoundingBox2D, ObjectHypothesisWithPose
 from cv_bridge import CvBridge
 import cv2
 import numpy as np
+import argparse
 
 class BlobDetectionNode(Node):
     def __init__(self):
         super().__init__('blob_detection_node')
-
-        # Initialize CvBridge
         self.bridge = CvBridge()
+        self.detector = self.setup_blob_detector()
 
-        # Subscribers
-        self.create_subscription(
+        self.subscription = self.create_subscription(
             Image,
             '/tb4_jazzy/oakd/rgb/preview/image_raw',
             self.image_callback,
             10
         )
+        self.get_logger().info('Running in ROS 2 mode (subscribed to camera topic)')
 
-        # Publisher for detections
-        self.detection_pub = self.create_publisher(
-            Detection2DArray,
-            '/blob_detections',
-            10
-        )
-
-        # Setup SimpleBlobDetector parameters
+    def setup_blob_detector(self):
         params = cv2.SimpleBlobDetector_Params()
         params.filterByArea = True
-        params.minArea = 200  # Adjusted for smaller boxes
-        params.maxArea = 20000  # Adjusted for larger boxes
+        params.minArea = 200
+        params.maxArea = 20000
         params.filterByCircularity = False
         params.filterByConvexity = True
-        params.minConvexity = 0.7  # Slightly relaxed for box shapes
+        params.minConvexity = 0.7
         params.filterByInertia = True
-        params.minInertiaRatio = 0.3  # Allow rectangular shapes
-        self.detector = cv2.SimpleBlobDetector_create(params)
+        params.minInertiaRatio = 0.3
+        return cv2.SimpleBlobDetector_create(params)
 
-        self.get_logger().info("Blob Detection Node initialized")
+    def process_frame(self, cv_image):
+        gray = cv2.cvtColor(cv_image, cv2.COLOR_BGR2GRAY)
+        gray = cv2.equalizeHist(gray)
+        keypoints = self.detector.detect(gray)
 
-    def image_callback(self, msg):
-        # Convert ROS Image to OpenCV
-        cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
-
-        # Convert to grayscale for blob detection
-        gray_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2GRAY)
-        gray_image = cv2.equalizeHist(gray_image)  # Enhance contrast
-
-        # Apply blob detection
-        keypoints = self.detector.detect(gray_image)
-
-        # Prepare Detection2DArray message
-        detection_array = Detection2DArray()
-        detection_array.header = msg.header
-
-        # Process detected blobs
         for kp in keypoints:
-            x, y = kp.pt
-            size = kp.size  # Diameter of the blob
-            w = h = size  # Approximate square bounding box
+            x, y = int(kp.pt[0]), int(kp.pt[1])
+            size = kp.size
+            cv2.circle(cv_image, (x, y), int(size/2), (0, 255, 0), 2)
 
-            # Filter for box-shaped blobs
-            if self.is_box_shaped(w, h):
-                detection = Detection2D()
-                bbox = BoundingBox2D()
-
-                # Bounding box coordinates
-                bbox.center.position.x = float(x)
-                bbox.center.position.y = float(y)
-                bbox.size_x = float(w)
-                bbox.size_y = float(h)
-
-                # Object hypothesis
-                hypothesis = ObjectHypothesisWithPose()
-                hypothesis.hypothesis.class_id = "box"  # Use class_id instead of id
-                hypothesis.hypothesis.score = 1.0  # Blob detector doesn't provide confidence
-                hypothesis.pose.pose.position.x = float(x)
-                hypothesis.pose.pose.position.y = float(y)
-
-                detection.bbox = bbox
-                detection.results.append(hypothesis)
-                detection_array.detections.append(detection)
-
-                # Draw blob as a rectangle
-                x_min = int(x - w / 2)
-                y_min = int(y - h / 2)
-                x_max = int(x + w / 2)
-                y_max = int(y + h / 2)
-                cv2.rectangle(cv_image, (x_min, y_min), (x_max, y_max), (0, 255, 0), 2)
-                cv2.putText(
-                    cv_image,
-                    "Box",
-                    (x_min, y_min - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.6,
-                    (255, 255, 0),
-                    2
-                )
-
-        # Publish detections
-        self.detection_pub.publish(detection_array)
-
-        # Display image
-        cv2.imshow("Blob Detections", cv_image)
+        cv2.imshow("Blob Detection", cv_image)
         cv2.waitKey(1)
 
-    def is_box_shaped(self, w, h):
-        # Heuristic for box-shaped blobs
-        aspect_ratio = w / h if h > 0 else 1.0
-        return 0.5 < aspect_ratio < 2.0
+    def image_callback(self, msg):
+        cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+        self.process_frame(cv_image)
 
-    def destroy_node(self):
-        cv2.destroyAllWindows()
-        super().destroy_node()
+def local_camera_mode():
+    cap = cv2.VideoCapture(0)
+    if not cap.isOpened():
+        print("Error: Could not open local camera.")
+        return
 
-def main(args=None):
-    rclpy.init(args=args)
-    node = BlobDetectionNode()
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        node.destroy_node()
-        rclpy.shutdown()
+    detector = BlobDetectionNode().setup_blob_detector()
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        gray = cv2.equalizeHist(gray)
+        keypoints = detector.detect(gray)
+
+        for kp in keypoints:
+            x, y = int(kp.pt[0]), int(kp.pt[1])
+            size = kp.size
+            cv2.circle(frame, (x, y), int(size/2), (0, 255, 0), 2)
+
+        cv2.imshow('Blob Detection - Local Camera', frame)
+
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+    cap.release()
+    cv2.destroyAllWindows()
+
+def main():
+    parser = argparse.ArgumentParser(description='Blob Detection Node with ROS 2 and Local Camera Support')
+    parser.add_argument('--mode', type=str, choices=['ros', 'local'], default='ros',
+                        help='Mode to run: ros (subscribe to ROS topic) or local (use USB camera)')
+    args = parser.parse_args()
+
+    if args.mode == 'ros':
+        rclpy.init()
+        node = BlobDetectionNode()
+        try:
+            rclpy.spin(node)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            node.destroy_node()
+            rclpy.shutdown()
+            cv2.destroyAllWindows()
+    else:
+        local_camera_mode()
 
 if __name__ == '__main__':
     main()
+
