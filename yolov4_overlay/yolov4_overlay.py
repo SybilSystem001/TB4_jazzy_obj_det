@@ -8,6 +8,18 @@ import cv2
 import numpy as np
 import argparse
 
+def setup_blob_detector():
+    params = cv2.SimpleBlobDetector_Params()
+    params.filterByArea = True
+    params.minArea = 200
+    params.maxArea = 20000
+    params.filterByCircularity = False
+    params.filterByConvexity = True
+    params.minConvexity = 0.7
+    params.filterByInertia = True
+    params.minInertiaRatio = 0.3
+    return cv2.SimpleBlobDetector_create(params)
+
 class BlobDetectionNode(Node):
     def __init__(self):
         super().__init__('blob_detection_node')
@@ -22,17 +34,6 @@ class BlobDetectionNode(Node):
         )
         self.get_logger().info('Running in ROS 2 mode (subscribed to camera topic)')
 
-    def setup_blob_detector(self):
-        params = cv2.SimpleBlobDetector_Params()
-        params.filterByArea = True
-        params.minArea = 200
-        params.maxArea = 20000
-        params.filterByCircularity = False
-        params.filterByConvexity = True
-        params.minConvexity = 0.7
-        params.filterByInertia = True
-        params.minInertiaRatio = 0.3
-        return cv2.SimpleBlobDetector_create(params)
 
     def process_frame(self, cv_image):
         gray = cv2.cvtColor(cv_image, cv2.COLOR_BGR2GRAY)
@@ -57,7 +58,7 @@ def local_camera_mode():
         print("Error: Could not open local camera.")
         return
 
-    detector = BlobDetectionNode().setup_blob_detector()
+    detector = setup_blob_detector()
 
     while True:
         ret, frame = cap.read()
